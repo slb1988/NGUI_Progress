@@ -357,9 +357,9 @@ public class EventDelegate
 					{
 #if UNITY_WP8
 						mMethod = type.GetMethod(mMethodName);
-#else
-						mMethod = type.GetMethod(mMethodName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+						if (mMethod == null)
 #endif
+						mMethod = type.GetMethod(mMethodName, BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
 						if (mMethod != null) break;
 						type = type.BaseType;
 						if (type == null) break;
@@ -568,8 +568,8 @@ public class EventDelegate
 			int period = typeName.LastIndexOf('.');
 			if (period > 0) typeName = typeName.Substring(period + 1);
 
-			if (!string.IsNullOrEmpty(methodName)) return typeName + "." + methodName;
-			else return typeName + ".[delegate]";
+			if (!string.IsNullOrEmpty(methodName)) return typeName + "/" + methodName;
+			else return typeName + "/[delegate]";
 		}
 		return mRawDelegate ? "[delegate]" : null;
 	}
