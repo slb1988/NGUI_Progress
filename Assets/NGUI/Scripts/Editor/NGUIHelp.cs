@@ -1,6 +1,6 @@
 //----------------------------------------------
 //            NGUI: Next-Gen UI kit
-// Copyright © 2011-2013 Tasharen Entertainment
+// Copyright © 2011-2014 Tasharen Entertainment
 //----------------------------------------------
 
 using UnityEngine;
@@ -53,6 +53,9 @@ static public class NGUIHelp
 
 		if (type == typeof(UIPlayTween) || type.IsSubclassOf(typeof(UITweener)))
 			return "http://www.tasharen.com/forum/index.php?topic=6760";
+
+		if (type == typeof(UILocalize) || type == typeof(Localization))
+			return "http://www.tasharen.com/forum/index.php?topic=8092.0";
 
 		return null;
 	}

@@ -1,6 +1,6 @@
 //----------------------------------------------
 //            NGUI: Next-Gen UI kit
-// Copyright © 2011-2013 Tasharen Entertainment
+// Copyright © 2011-2014 Tasharen Entertainment
 //----------------------------------------------
 
 #if !UNITY_EDITOR && (UNITY_IPHONE || UNITY_ANDROID || UNITY_WP8 || UNITY_BLACKBERRY)
@@ -170,7 +170,19 @@ public class UIInput : MonoBehaviour
 	/// Default text used by the input's label.
 	/// </summary>
 
-	public string defaultText { get { return mDefaultText; } set { mDefaultText = value; } }
+	public string defaultText
+	{
+		get
+		{
+			return mDefaultText;
+		}
+		set
+		{
+			if (mDoInit) Init();
+			mDefaultText = value;
+			UpdateLabel();
+		}
+	}
 
 	[System.Obsolete("Use UIInput.value instead")]
 	public string text { get { return this.value; } set { this.value = value; } }
@@ -187,17 +199,6 @@ public class UIInput : MonoBehaviour
 			if (!Application.isPlaying) return "";
 #endif
 			if (mDoInit) Init();
-#if MOBILE
-			if (isSelected && mKeyboard != null && mKeyboard.active)
-			{
-				string val = mKeyboard.text;
-#if !UNITY_3_5
-				if (Application.platform == RuntimePlatform.BB10Player)
-					val = val.Replace("\\b", "\b");
-#endif
-				return val;
-			}
-#endif
 			return mValue;
 		}
 		set
@@ -207,37 +208,47 @@ public class UIInput : MonoBehaviour
 #endif
 			if (mDoInit) Init();
 			mDrawStart = 0;
-#if MOBILE
-			if (isSelected && mKeyboard != null)
-				mKeyboard.text = value;
 
-			if (this.value != value)
+#if MOBILE && !UNITY_3_5
+			// BB10's implementation has a bug in Unity
+			if (Application.platform == RuntimePlatform.BB10Player)
+				value = value.Replace("\\b", "\b");
+#endif
+			// Validate all input
+			value = Validate(value);
+#if MOBILE
+			if (isSelected && mKeyboard != null && mCached != value)
+			{
+				mKeyboard.text = value;
+				mCached = value;
+			}
+
+			if (mValue != value)
 			{
 				mValue = value;
-				if (isSelected && mKeyboard != null) mKeyboard.text = value;
-				SaveToPlayerPrefs(mValue);
+				if (!isSelected) SaveToPlayerPrefs(value);
 				UpdateLabel();
 				ExecuteOnChange();
 			}
 #else
-			if (this.value != value)
+			if (mValue != value)
 			{
 				mValue = value;
 
 				if (isSelected)
 				{
-					if (string.IsNullOrEmpty(mValue))
+					if (string.IsNullOrEmpty(value))
 					{
 						mSelectionStart = 0;
 						mSelectionEnd = 0;
 					}
 					else
 					{
-						mSelectionStart = mValue.Length;
+						mSelectionStart = value.Length;
 						mSelectionEnd = mSelectionStart;
 					}
 				}
-				else SaveToPlayerPrefs(mValue);
+				else SaveToPlayerPrefs(value);
 
 				UpdateLabel();
 				ExecuteOnChange();
@@ -277,6 +288,29 @@ public class UIInput : MonoBehaviour
 #endif
 
 	/// <summary>
+	/// Validate the specified text, returning the validated version.
+	/// </summary>
+
+	public string Validate (string val)
+	{
+		if (string.IsNullOrEmpty(val)) return "";
+
+		StringBuilder sb = new StringBuilder(val.Length);
+
+		for (int i = 0; i < val.Length; ++i)
+		{
+			char c = val[i];
+			if (onValidate != null) c = onValidate(sb.ToString(), sb.Length, c);
+			else if (validation != Validation.None) c = Validate(sb.ToString(), sb.Length, c);
+			if (c != 0) sb.Append(c);
+		}
+
+		if (characterLimit > 0 && sb.Length > characterLimit)
+			return sb.ToString(0, characterLimit);
+		return sb.ToString();
+	}
+
+	/// <summary>
 	/// Automatically set the value by loading it from player prefs if possible.
 	/// </summary>
 
@@ -302,6 +336,13 @@ public class UIInput : MonoBehaviour
 			mDefaultText = label.text;
 			mDefaultColor = label.color;
 			label.supportEncoding = false;
+
+			if (label.alignment == NGUIText.Alignment.Justified)
+			{
+				label.alignment = NGUIText.Alignment.Left;
+				Debug.LogWarning("Input fields using labels with justified alignment are not supported at this time", this);
+			}
+
 			mPivot = label.pivot;
 			mPosition = label.cachedTransform.localPosition.x;
 			UpdateLabel();
@@ -362,10 +403,12 @@ public class UIInput : MonoBehaviour
 			else
 #endif
 			{
-				Input.imeCompositionMode = IMECompositionMode.On;
-				Input.compositionCursorPos = (UICamera.current != null && UICamera.current.cachedCamera != null) ?
+				Vector2 pos = (UICamera.current != null && UICamera.current.cachedCamera != null) ?
 					UICamera.current.cachedCamera.WorldToScreenPoint(label.worldCorners[0]) :
 					label.worldCorners[0];
+				pos.y = Screen.height - pos.y;
+				Input.imeCompositionMode = IMECompositionMode.On;
+				Input.compositionCursorPos = pos;
 #if !MOBILE
 				mSelectionStart = 0;
 				mSelectionEnd = string.IsNullOrEmpty(mValue) ? 0 : mValue.Length;
@@ -401,7 +444,7 @@ public class UIInput : MonoBehaviour
 			}
 			else label.text = mValue;
 
-			Input.imeCompositionMode = IMECompositionMode.Off;
+			Input.imeCompositionMode = IMECompositionMode.Auto;
 			RestoreLabelPivot();
 		}
 		
@@ -414,35 +457,18 @@ public class UIInput : MonoBehaviour
 	/// </summary>
 
 #if MOBILE
+	string mCached = "";
+
 	void Update()
 	{
 		if (mKeyboard != null && isSelected)
 		{
-			string val = mKeyboard.text;
-#if !UNITY_3_5
-			// BB10's implementation has a bug in Unity
-			if (Application.platform == RuntimePlatform.BB10Player)
-				val = val.Replace("\\b", "\b");
-#endif
-			if (mValue != val)
+			string text = mKeyboard.text;
+
+			if (mCached != text)
 			{
-				mValue = "";
-
-				for (int i = 0; i < val.Length; ++i)
-				{
-					char c = val[i];
-					if (onValidate != null) c = onValidate(mValue, mValue.Length, c);
-					else if (validation != Validation.None) c = Validate(mValue, mValue.Length, c);
-					if (c != 0) mValue += c;
-				}
-
-				if (characterLimit > 0 && mValue.Length > characterLimit)
-					mValue = mValue.Substring(0, characterLimit);
-				
-				UpdateLabel();
-				ExecuteOnChange();
-
-				if (mValue != val) mKeyboard.text = mValue;
+				mCached = text;
+				value = text;
 			}
 
 			if (mKeyboard.done)
@@ -453,6 +479,7 @@ public class UIInput : MonoBehaviour
 					Submit();
 				mKeyboard = null;
 				isSelected = false;
+				mCached = "";
 			}
 		}
 	}
@@ -472,12 +499,16 @@ public class UIInput : MonoBehaviour
 				return;
 			}
 
-			// Process input ignoring non-printable characters as they are not consistent.
-			// Windows has them, OSX may not. They get handled inside OnGUI() instead.
-			string s = Input.inputString;
-			
-			if (!string.IsNullOrEmpty(s))
+			string ime = Input.compositionString;
+
+			// There seems to be an inconsistency between IME on Windows, and IME on OSX.
+			// On Windows, Input.inputString is always empty while IME is active. On the OSX it is not.
+			if (string.IsNullOrEmpty(ime) && !string.IsNullOrEmpty(Input.inputString))
 			{
+				// Process input ignoring non-printable characters as they are not consistent.
+				// Windows has them, OSX may not. They get handled inside OnGUI() instead.
+				string s = Input.inputString;
+
 				for (int i = 0; i < s.Length; ++i)
 				{
 					char ch = s[i];
@@ -486,9 +517,10 @@ public class UIInput : MonoBehaviour
 			}
 
 			// Append IME composition
-			if (mLastIME != Input.compositionString)
+			if (mLastIME != ime)
 			{
-				mLastIME = Input.compositionString;
+				mSelectionEnd = string.IsNullOrEmpty(ime) ? mSelectionStart : mValue.Length + ime.Length;
+				mLastIME = ime;
 				UpdateLabel();
 				ExecuteOnChange();
 			}
@@ -559,7 +591,7 @@ public class UIInput : MonoBehaviour
 				{
 					if (mSelectionStart == mSelectionEnd)
 					{
-						if (mSelectionStart + 1 >= mValue.Length) return true;
+						if (mSelectionStart >= mValue.Length) return true;
 						++mSelectionEnd;
 					}
 					Insert("");
@@ -749,6 +781,7 @@ public class UIInput : MonoBehaviour
 	{
 		string left = GetLeftText();
 		string right = GetRightText();
+		int rl = right.Length;
 
 		StringBuilder sb = new StringBuilder(left.Length + right.Length + text.Length);
 		sb.Append(left);
@@ -756,14 +789,13 @@ public class UIInput : MonoBehaviour
 		// Append the new text
 		for (int i = 0, imax = text.Length; i < imax; ++i)
 		{
-			char c = text[i];
-
 			// Can't go past the character limit
-			if (characterLimit > 0 && mValue.Length >= characterLimit) continue;
+			if (characterLimit > 0 && sb.Length + rl >= characterLimit) break;
 
 			// If we have an input validator, validate the input first
-			if (onValidate != null) c = onValidate(mValue, mValue.Length, c);
-			else if (validation != Validation.None) c = Validate(mValue, mValue.Length, c);
+			char c = text[i];
+			if (onValidate != null) c = onValidate(sb.ToString(), sb.Length, c);
+			else if (validation != Validation.None) c = Validate(sb.ToString(), sb.Length, c);
 
 			// Append the character if it hasn't been invalidated
 			if (c != 0) sb.Append(c);
@@ -777,9 +809,8 @@ public class UIInput : MonoBehaviour
 		for (int i = 0, imax = right.Length; i < imax; ++i)
 		{
 			char c = right[i];
-			if (characterLimit > 0 && mValue.Length >= characterLimit) continue;
-			if (onValidate != null) c = onValidate(mValue, mValue.Length, c);
-			else if (validation != Validation.None) c = Validate(mValue, mValue.Length, c);
+			if (onValidate != null) c = onValidate(sb.ToString(), sb.Length, c);
+			else if (validation != Validation.None) c = Validate(sb.ToString(), sb.Length, c);
 			if (c != 0) sb.Append(c);
 		}
 
@@ -836,7 +867,7 @@ public class UIInput : MonoBehaviour
 		Ray ray = UICamera.currentRay;
 		Plane p = new Plane(corners[0], corners[1], corners[2]);
 		float dist;
-		return p.Raycast(ray, out dist) ? mDrawStart + label.GetCharacterIndex(ray.GetPoint(dist)) : 0;
+		return p.Raycast(ray, out dist) ? mDrawStart + label.GetCharacterIndexAtPosition(ray.GetPoint(dist)) : 0;
 	}
 
 	/// <summary>
@@ -903,7 +934,7 @@ public class UIInput : MonoBehaviour
 	/// Submit the input field's text.
 	/// </summary>
 
-	protected void Submit ()
+	public void Submit ()
 	{
 		if (NGUITools.GetActive(this))
 		{
@@ -919,14 +950,14 @@ public class UIInput : MonoBehaviour
 	/// Update the visual text label.
 	/// </summary>
 
-	protected void UpdateLabel ()
+	public void UpdateLabel ()
 	{
 		if (label != null)
 		{
 			if (mDoInit) Init();
 			bool selected = isSelected;
 			string fullText = value;
-			bool isEmpty = string.IsNullOrEmpty(fullText);
+			bool isEmpty = string.IsNullOrEmpty(fullText) && string.IsNullOrEmpty(Input.compositionString);
 			label.color = (isEmpty && !selected) ? mDefaultColor : activeTextColor;
 			string processed;
 

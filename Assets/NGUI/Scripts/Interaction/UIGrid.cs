@@ -1,6 +1,6 @@
 //----------------------------------------------
 //            NGUI: Next-Gen UI kit
-// Copyright © 2011-2013 Tasharen Entertainment
+// Copyright © 2011-2014 Tasharen Entertainment
 //----------------------------------------------
 
 using UnityEngine;
@@ -67,6 +67,12 @@ public class UIGrid : UIWidgetContainer
 	public bool hideInactive = true;
 
 	/// <summary>
+	/// Whether the parent container will be notified of the grid's changes.
+	/// </summary>
+
+	public bool keepWithinPanel = false;
+
+	/// <summary>
 	/// Callback triggered when the grid repositions its contents.
 	/// </summary>
 
@@ -78,23 +84,19 @@ public class UIGrid : UIWidgetContainer
 
 	public bool repositionNow { set { if (value) { mReposition = true; enabled = true; } } }
 
-	bool mStarted = false;
-	bool mReposition = false;
-	UIPanel mPanel;
-	UIScrollView mDrag;
-	bool mInitDone = false;
+	protected bool mReposition = false;
+	protected UIPanel mPanel;
+	protected bool mInitDone = false;
 
-	void Init ()
+	protected virtual void Init ()
 	{
 		mInitDone = true;
 		mPanel = NGUITools.FindInParents<UIPanel>(gameObject);
-		mDrag = NGUITools.FindInParents<UIScrollView>(gameObject);
 	}
 
-	void Start ()
+	protected virtual void Start ()
 	{
 		if (!mInitDone) Init();
-		mStarted = true;
 		bool smooth = animateSmoothly;
 		animateSmoothly = false;
 		Reposition();
@@ -102,22 +104,28 @@ public class UIGrid : UIWidgetContainer
 		enabled = false;
 	}
 
-	void Update ()
+	protected virtual void Update ()
 	{
 		if (mReposition) Reposition();
 		enabled = false;
 	}
 
-	static public int SortByName (Transform a, Transform b) { return string.Compare(a.name, b.name); }
+	static protected int SortByName (Transform a, Transform b) { return string.Compare(a.name, b.name); }
+
+	/// <summary>
+	/// Want your own custom sorting logic? Override this function.
+	/// </summary>
+
+	protected virtual void Sort (List<Transform> list) { list.Sort(SortByName); }
 
 	/// <summary>
 	/// Recalculate the position of all elements within the grid, sorting them alphabetically if necessary.
 	/// </summary>
 
 	[ContextMenu("Execute")]
-	public void Reposition ()
+	public virtual void Reposition ()
 	{
-		if (Application.isPlaying && !mStarted)
+		if (Application.isPlaying && !mInitDone && NGUITools.GetActive(this))
 		{
 			mReposition = true;
 			return;
@@ -140,7 +148,7 @@ public class UIGrid : UIWidgetContainer
 				Transform t = myTrans.GetChild(i);
 				if (t && (!hideInactive || NGUITools.GetActive(t.gameObject))) list.Add(t);
 			}
-			list.Sort(SortByName);
+			Sort(list);
 
 			for (int i = 0, imax = list.Count; i < imax; ++i)
 			{
@@ -155,7 +163,7 @@ public class UIGrid : UIWidgetContainer
 
 				if (animateSmoothly && Application.isPlaying)
 				{
-					SpringPosition.Begin(t.gameObject, pos, 15f);
+					SpringPosition.Begin(t.gameObject, pos, 15f).updateScrollView = true;
 				}
 				else t.localPosition = pos;
 
@@ -181,7 +189,7 @@ public class UIGrid : UIWidgetContainer
 
 				if (animateSmoothly && Application.isPlaying)
 				{
-					SpringPosition.Begin(t.gameObject, pos, 15f);
+					SpringPosition.Begin(t.gameObject, pos, 15f).updateScrollView = true;
 				}
 				else t.localPosition = pos;
 
@@ -193,15 +201,8 @@ public class UIGrid : UIWidgetContainer
 			}
 		}
 
-		if (mDrag != null)
-		{
-			mDrag.UpdateScrollbars(true);
-			mDrag.RestrictWithinBounds(true);
-		}
-		else if (mPanel != null)
-		{
+		if (keepWithinPanel && mPanel != null)
 			mPanel.ConstrainTargetToBounds(myTrans, true);
-		}
 
 		if (onReposition != null)
 			onReposition();

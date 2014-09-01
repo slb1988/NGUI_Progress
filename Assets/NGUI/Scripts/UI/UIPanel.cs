@@ -1,6 +1,6 @@
 //----------------------------------------------
 //            NGUI: Next-Gen UI kit
-// Copyright © 2011-2013 Tasharen Entertainment
+// Copyright © 2011-2014 Tasharen Entertainment
 //----------------------------------------------
 
 #if UNITY_FLASH || UNITY_WP8 || UNITY_METRO
@@ -141,11 +141,12 @@ public class UIPanel : UIRect
 	static BetterList<Color32> mCols = new BetterList<Color32>();
 
 	Camera mCam;
-	Vector2 mClipOffset = Vector2.zero;
+	[SerializeField] Vector2 mClipOffset = Vector2.zero;
 
 	float mCullTime = 0f;
 	float mUpdateTime = 0f;
 	int mMatrixFrame = -1;
+	int mAlphaFrameID = 0;
 	int mLayer = -1;
 
 	// Values used for visibility checks
@@ -171,6 +172,12 @@ public class UIPanel : UIRect
 	}
 
 	/// <summary>
+	/// Whether the rectangle can be anchored.
+	/// </summary>
+
+	public override bool canBeAnchored { get { return mClipping != UIDrawCall.Clipping.None; } }
+
+	/// <summary>
 	/// Panel's alpha affects everything drawn by the panel.
 	/// </summary>
 
@@ -186,6 +193,8 @@ public class UIPanel : UIRect
 
 			if (mAlpha != val)
 			{
+				mAlphaFrameID = -1;
+				mResized = true;
 				mAlpha = val;
 				SetDirty();
 			}
@@ -208,7 +217,7 @@ public class UIPanel : UIRect
 			{
 				mDepth = value;
 #if UNITY_EDITOR
-				UnityEditor.EditorUtility.SetDirty(this);
+				NGUITools.SetDirty(this);
 #endif
 				list.Sort(CompareFunc);
 			}
@@ -297,6 +306,12 @@ public class UIPanel : UIRect
 	}
 
 	/// <summary>
+	/// Whether the panel will actually perform clipping of children.
+	/// </summary>
+
+	public bool clipsChildren { get { return mClipping == UIDrawCall.Clipping.AlphaClip || mClipping == UIDrawCall.Clipping.SoftClip; } }
+
+	/// <summary>
 	/// Clipping area offset used to make it possible to move clipped panels (scroll views) efficiently.
 	/// Scroll views move by adjusting the clip offset by one value, and the transform position by the inverse.
 	/// This makes it possible to not have to rebuild the geometry, greatly improving performance.
@@ -355,15 +370,18 @@ public class UIPanel : UIRect
 		}
 		set
 		{
-			if (Mathf.Abs(mClipRange.x - value.x) > 0.001f ||
-				Mathf.Abs(mClipRange.y - value.y) > 0.001f ||
-				Mathf.Abs(mClipRange.z - value.z) > 0.001f ||
-				Mathf.Abs(mClipRange.w - value.w) > 0.001f)
+			if (Mathf.Abs(mClipRange.x - value.x) > 0.49f ||
+				Mathf.Abs(mClipRange.y - value.y) > 0.49f ||
+				Mathf.Abs(mClipRange.z - value.z) > 0.49f ||
+				Mathf.Abs(mClipRange.w - value.w) > 0.49f)
 			{
 				mResized = true;
 				mCullTime = (mCullTime == 0f) ? 0.001f : RealTime.time + 0.15f;
 				mClipRange = value;
 				mMatrixFrame = -1;
+
+				UIScrollView sv = GetComponent<UIScrollView>();
+				if (sv != null) sv.UpdatePosition();
 #if UNITY_EDITOR
 				if (!Application.isPlaying) UpdateDrawCalls();
 #endif
@@ -372,7 +390,7 @@ public class UIPanel : UIRect
 	}
 
 	/// <summary>
-	/// Final clipping region after the offset has been taken into consideration.
+	/// Final clipping region after the offset has been taken into consideration. XY = center, ZW = size.
 	/// </summary>
 
 	public Vector4 finalClipRegion
@@ -550,7 +568,15 @@ public class UIPanel : UIRect
 		return base.GetSides(relativeTo);
 	}
 
-	int mAlphaFrameID = 0;
+	/// <summary>
+	/// Invalidating the panel should reset its alpha.
+	/// </summary>
+
+	public override void Invalidate (bool includeChildren)
+	{
+		mAlphaFrameID = -1;
+		base.Invalidate(includeChildren);
+	}
 
 	/// <summary>
 	/// Widget's final alpha, after taking the panel's alpha into account.
@@ -612,7 +638,9 @@ public class UIPanel : UIRect
 	public bool IsVisible (Vector3 worldPos)
 	{
 		if (mAlpha < 0.001f) return false;
-		if (mClipping == UIDrawCall.Clipping.None) return true;
+		if (mClipping == UIDrawCall.Clipping.None ||
+			mClipping == UIDrawCall.Clipping.ConstrainButDontClip) return true;
+
 		UpdateTransformMatrix();
 
 		Vector3 pos = worldToLocal.MultiplyPoint3x4(worldPos);
@@ -627,8 +655,10 @@ public class UIPanel : UIRect
 	/// Returns whether the specified widget is visible by the panel.
 	/// </summary>
 
-	public bool IsVisible (UIRect w)
+	public bool IsVisible (UIWidget w)
 	{
+		if ((mClipping == UIDrawCall.Clipping.None || mClipping == UIDrawCall.Clipping.ConstrainButDontClip) && !w.hideIfOffScreen)
+			return true;
 		Vector3[] corners = w.worldCorners;
 		return IsVisible(corners[0], corners[1], corners[2], corners[3]);
 	}
@@ -698,6 +728,9 @@ public class UIPanel : UIRect
 		}
 
 		mRebuild = true;
+		mAlphaFrameID = -1;
+		mMatrixFrame = -1;
+
 		list.Add(this);
 		list.Sort(CompareFunc);
 	}
@@ -709,9 +742,16 @@ public class UIPanel : UIRect
 	protected override void OnDisable ()
 	{
 		for (int i = 0; i < drawCalls.size; ++i)
-			UIDrawCall.Destroy(drawCalls.buffer[i]);
+		{
+			UIDrawCall dc = drawCalls.buffer[i];
+			if (dc != null) UIDrawCall.Destroy(dc);
+		}
+		
 		drawCalls.Clear();
 		list.Remove(this);
+
+		mAlphaFrameID = -1;
+		mMatrixFrame = -1;
 		
 		if (list.size == 0)
 		{
@@ -1156,7 +1196,7 @@ public class UIPanel : UIRect
 			t.rotation = rot;
 			t.localScale = scale;
 
-			dc.renderQueue = startingRenderQueue + i;
+			dc.renderQueue = (renderQueue == RenderQueue.Explicit) ? startingRenderQueue : startingRenderQueue + i;
 			dc.clipping = clipping;
 			dc.clipRange = range;
 			dc.clipSoftness = mClipSoftness;
@@ -1184,6 +1224,8 @@ public class UIPanel : UIRect
 		}
 	}
 
+	bool mForced = false;
+
 	/// <summary>
 	/// Update all of the widgets belonging to this panel.
 	/// </summary>
@@ -1196,6 +1238,14 @@ public class UIPanel : UIRect
 		bool forceVisible = cullWhileDragging ? false : (mCullTime > mUpdateTime);
 #endif
 		bool changed = false;
+
+		if (mForced != forceVisible)
+		{
+			mForced = forceVisible;
+			mResized = true;
+		}
+
+		bool clipped = clipsChildren;
 
 		// Update all widgets
 		for (int i = 0, imax = widgets.size; i < imax; ++i)
@@ -1246,10 +1296,8 @@ public class UIPanel : UIRect
 				if (w.UpdateTransform(frame) || mResized)
 				{
 					// Only proceed to checking the widget's visibility if it actually moved
-					bool vis = forceVisible ||
-						(mClipping == UIDrawCall.Clipping.None && !w.hideIfOffScreen) ||
-						(w.CalculateCumulativeAlpha(frame) > 0.001f && IsVisible(w));
-					w.UpdateVisibility(vis);
+					bool vis = forceVisible || (w.CalculateCumulativeAlpha(frame) > 0.001f);
+					w.UpdateVisibility(vis, forceVisible || ((clipped || w.hideIfOffScreen) ? IsVisible(w) : true));
 				}
 				
 				// Update the widget's geometry if necessary
@@ -1321,8 +1369,28 @@ public class UIPanel : UIRect
 
 	public void AddWidget (UIWidget w)
 	{
-		widgets.Add(w);
-		mSortWidgets = true;
+		if (widgets.size == 0)
+		{
+			widgets.Add(w);
+		}
+		else if (mSortWidgets)
+		{
+			widgets.Add(w);
+			SortWidgets();
+		}
+		else if (UIWidget.PanelCompareFunc(w, widgets[0]) == -1)
+		{
+			widgets.Insert(0, w);
+		}
+		else
+		{
+			for (int i = widgets.size; i > 0; )
+			{
+				if (UIWidget.PanelCompareFunc(w, widgets[--i]) == -1) continue;
+				widgets.Insert(i+1, w);
+				break;
+			}
+		}
 		FindDrawCall(w);
 	}
 

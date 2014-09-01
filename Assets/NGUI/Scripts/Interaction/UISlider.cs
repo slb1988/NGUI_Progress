@@ -1,6 +1,6 @@
 //----------------------------------------------
 //            NGUI: Next-Gen UI kit
-// Copyright © 2011-2013 Tasharen Entertainment
+// Copyright © 2011-2014 Tasharen Entertainment
 //----------------------------------------------
 
 using UnityEngine;
@@ -58,7 +58,7 @@ public class UISlider : UIProgressBar
 			}
 			direction = Direction.Upgraded;
 #if UNITY_EDITOR
-			UnityEditor.EditorUtility.SetDirty(this);
+			NGUITools.SetDirty(this);
 #endif
 		}
 	}

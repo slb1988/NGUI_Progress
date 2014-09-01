@@ -1,6 +1,6 @@
 //----------------------------------------------
 //            NGUI: Next-Gen UI kit
-// Copyright © 2011-2013 Tasharen Entertainment
+// Copyright © 2011-2014 Tasharen Entertainment
 //----------------------------------------------
 
 //#define SHOW_HIDDEN_OBJECTS
@@ -149,7 +149,7 @@ public class UIDrawCall : MonoBehaviour
 				if (mRenderer != null)
 				{
 					mRenderer.enabled = value;
-					UnityEditor.EditorUtility.SetDirty(gameObject);
+					NGUITools.SetDirty(gameObject);
 				}
 			}
 		}
@@ -285,30 +285,30 @@ public class UIDrawCall : MonoBehaviour
 		}
 		else // No clipping
 		{
-			shader = (mShader != null) ? mShader : Shader.Find(shaderName);
+			shader = Shader.Find(shaderName);
 		}
 
 		if (mMaterial != null)
 		{
 			mDynamicMat = new Material(mMaterial);
-			mDynamicMat.hideFlags = HideFlags.DontSave;
+			mDynamicMat.hideFlags = HideFlags.DontSave | HideFlags.NotEditable;
 			mDynamicMat.CopyPropertiesFromMaterial(mMaterial);
-
-			// If there is a valid shader, assign it to the custom material
-			if (shader != null)
-			{
-				mDynamicMat.shader = shader;
-			}
-			else if (mClipping != Clipping.None)
-			{
-				Debug.LogError(shaderName + " doesn't have a clipped shader version for " + mClipping);
-				mClipping = Clipping.None;
-			}
 		}
 		else
 		{
 			mDynamicMat = new Material(shader);
-			mDynamicMat.hideFlags = HideFlags.DontSave;
+			mDynamicMat.hideFlags = HideFlags.DontSave | HideFlags.NotEditable;
+		}
+
+		// If there is a valid shader, assign it to the custom material
+		if (shader != null)
+		{
+			mDynamicMat.shader = shader;
+		}
+		else if (mClipping != Clipping.None)
+		{
+			Debug.LogError(shaderName + " doesn't have a clipped shader version for " + mClipping);
+			mClipping = Clipping.None;
 		}
 	}
 
@@ -360,7 +360,12 @@ public class UIDrawCall : MonoBehaviour
 	/// Set the draw call's geometry.
 	/// </summary>
 
-	public void Set (BetterList<Vector3> verts, BetterList<Vector3> norms, BetterList<Vector4> tans, BetterList<Vector2> uvs, BetterList<Color32> cols)
+	public void Set (
+		BetterList<Vector3> verts,
+		BetterList<Vector3> norms,
+		BetterList<Vector4> tans,
+		BetterList<Vector2> uvs,
+		BetterList<Color32> cols)
 	{
 		int count = verts.size;
 
@@ -391,9 +396,16 @@ public class UIDrawCall : MonoBehaviour
 #if !UNITY_FLASH
 				// If the buffer length doesn't match, we need to trim all buffers
 				bool trim = (uvs.buffer.Length != verts.buffer.Length) ||
-				    (cols.buffer.Length != verts.buffer.Length) ||
-				    (norms != null && norms.buffer.Length != verts.buffer.Length) ||
-				    (tans != null && tans.buffer.Length != verts.buffer.Length);
+					(cols.buffer.Length != verts.buffer.Length) ||
+					(norms != null && norms.buffer.Length != verts.buffer.Length) ||
+					(tans != null && tans.buffer.Length != verts.buffer.Length);
+
+				// Non-automatic render queues rely on Z position, so it's a good idea to trim everything
+				if (!trim && panel.renderQueue != UIPanel.RenderQueue.Automatic)
+					trim = (mMesh == null || mMesh.vertexCount != verts.buffer.Length);
+
+				// If the number of vertices in the buffer is less than half of the full buffer, trim it
+				if (!trim && (verts.size << 1) < verts.buffer.Length) trim = true;
 
 				mTriangles = (verts.size >> 1);
 
@@ -448,7 +460,12 @@ public class UIDrawCall : MonoBehaviour
 					mIndices = GenerateCachedIndexBuffer(count, indexCount);
 					mMesh.triangles = mIndices;
 				}
-				if (!alwaysOnScreen) mMesh.RecalculateBounds();
+
+#if !UNITY_FLASH
+				if (trim || !alwaysOnScreen)
+#endif
+					mMesh.RecalculateBounds();
+
 				mFilter.mesh = mMesh;
 			}
 			else
@@ -554,7 +571,9 @@ public class UIDrawCall : MonoBehaviour
 		depthEnd = int.MinValue;
 		panel = null;
 		manager = null;
-		
+		mMaterial = null;
+		mTexture = null;
+
 		NGUITools.DestroyImmediate(mDynamicMat);
 		mDynamicMat = null;
 	}
@@ -593,6 +612,7 @@ public class UIDrawCall : MonoBehaviour
 	{
 		UIDrawCall dc = Create(name);
 		dc.gameObject.layer = pan.cachedGameObject.layer;
+		dc.clipping = pan.clipping;
 		dc.baseMaterial = mat;
 		dc.mainTexture = tex;
 		dc.shader = shader;
@@ -623,16 +643,17 @@ public class UIDrawCall : MonoBehaviour
 		// If we're in the editor, create the game object with hide flags set right away
 		GameObject go = UnityEditor.EditorUtility.CreateGameObjectWithHideFlags(name,
  #if SHOW_HIDDEN_OBJECTS
-			HideFlags.DontSave | HideFlags.NotEditable);
+			HideFlags.DontSave | HideFlags.NotEditable, typeof(UIDrawCall));
  #else
-			HideFlags.HideAndDontSave);
+			HideFlags.HideAndDontSave, typeof(UIDrawCall));
  #endif
+		UIDrawCall newDC = go.GetComponent<UIDrawCall>();
 #else
 		GameObject go = new GameObject(name);
 		DontDestroyOnLoad(go);
+		UIDrawCall newDC = go.AddComponent<UIDrawCall>();
 #endif
 		// Create the draw call
-		UIDrawCall newDC = go.AddComponent<UIDrawCall>();
 		mActiveList.Add(newDC);
 		return newDC;
 	}
@@ -648,8 +669,12 @@ public class UIDrawCall : MonoBehaviour
 		for (int i = mActiveList.size; i > 0; )
 		{
 			UIDrawCall dc = mActiveList[--i];
-			if (playing) NGUITools.SetActive(dc.gameObject, false);
-			else NGUITools.DestroyImmediate(dc.gameObject);
+
+			if (dc)
+			{
+				if (playing) NGUITools.SetActive(dc.gameObject, false);
+				else NGUITools.DestroyImmediate(dc.gameObject);
+			}
 		}
 		mActiveList.Clear();
 	}
@@ -661,11 +686,19 @@ public class UIDrawCall : MonoBehaviour
 	static public void ReleaseAll ()
 	{
 		ClearAll();
+		ReleaseInactive();
+	}
 
+	/// <summary>
+	/// Immediately destroy all inactive draw calls (draw calls that have been recycled and are waiting to be re-used).
+	/// </summary>
+
+	static public void ReleaseInactive()
+	{
 		for (int i = mInactiveList.size; i > 0; )
 		{
 			UIDrawCall dc = mInactiveList[--i];
-			NGUITools.DestroyImmediate(dc.gameObject);
+			if (dc) NGUITools.DestroyImmediate(dc.gameObject);
 		}
 		mInactiveList.Clear();
 	}
@@ -688,18 +721,21 @@ public class UIDrawCall : MonoBehaviour
 
 	static public void Destroy (UIDrawCall dc)
 	{
-		if (Application.isPlaying)
+		if (dc)
 		{
-			if (mActiveList.Remove(dc))
+			if (Application.isPlaying)
 			{
-				NGUITools.SetActive(dc.gameObject, false);
-				mInactiveList.Add(dc);
+				if (mActiveList.Remove(dc))
+				{
+					NGUITools.SetActive(dc.gameObject, false);
+					mInactiveList.Add(dc);
+				}
 			}
-		}
-		else
-		{
-			mActiveList.Remove(dc);
-			NGUITools.DestroyImmediate(dc.gameObject);
+			else
+			{
+				mActiveList.Remove(dc);
+				NGUITools.DestroyImmediate(dc.gameObject);
+			}
 		}
 	}
 }
