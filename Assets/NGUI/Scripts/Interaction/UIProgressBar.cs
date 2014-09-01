@@ -50,7 +50,6 @@ public class UIProgressBar : UIWidgetContainer
 	protected Transform mTrans;
 	protected bool mIsDirty = false;
 	protected Camera mCam;
-	protected UISprite mSprite;
 	protected float mOffset = 0f;
 
 	/// <summary>
@@ -104,8 +103,7 @@ public class UIProgressBar : UIWidgetContainer
 			if (mFill != value)
 			{
 				mFill = value;
-				mIsDirty = true;
-				if (!Application.isPlaying) ForceUpdate();
+				ForceUpdate();
 			}
 		}
 	}
@@ -128,7 +126,6 @@ public class UIProgressBar : UIWidgetContainer
 			if (mValue != val)
 			{
 				mValue = val;
-				mIsDirty = true;
 
 				if (EventDelegate.IsValid(onChange))
 				{
@@ -136,7 +133,7 @@ public class UIProgressBar : UIWidgetContainer
 					EventDelegate.Execute(onChange);
 					current = null;
 				}
-				if (!Application.isPlaying) ForceUpdate();
+				ForceUpdate();
 			}
 		}
 	}
@@ -200,8 +197,6 @@ public class UIProgressBar : UIWidgetContainer
 	{
 		Upgrade();
 
-		mSprite = mFG as UISprite;
-
 		if (Application.isPlaying)
 		{
 			if (mFG == null)
@@ -257,7 +252,6 @@ public class UIProgressBar : UIWidgetContainer
 	{
 		Upgrade();
 		mIsDirty = true;
-		mSprite = mFG as UISprite;
 		float val = Mathf.Clamp01(mValue);
 		if (mValue != val) mValue = val;
 		if (numberOfSteps < 0) numberOfSteps = 0;
@@ -319,13 +313,15 @@ public class UIProgressBar : UIWidgetContainer
 
 		if (mFG != null)
 		{
+			UISprite sprite = mFG as UISprite;
+
 			if (isHorizontal)
 			{
-				if (mSprite != null && mSprite.type == UISprite.Type.Filled)
+				if (sprite != null && sprite.type == UISprite.Type.Filled)
 				{
-					mSprite.fillDirection = UISprite.FillDirection.Horizontal;
-					mSprite.invert = isInverted;
-					mSprite.fillAmount = value;
+					sprite.fillDirection = UISprite.FillDirection.Horizontal;
+					sprite.invert = isInverted;
+					sprite.fillAmount = value;
 				}
 				else
 				{
@@ -334,11 +330,11 @@ public class UIProgressBar : UIWidgetContainer
 						new Vector4(0f, 0f, value, 1f);
 				}
 			}
-			else if (mSprite != null && mSprite.type == UISprite.Type.Filled)
+			else if (sprite != null && sprite.type == UISprite.Type.Filled)
 			{
-				mSprite.fillDirection = UISprite.FillDirection.Vertical;
-				mSprite.invert = isInverted;
-				mSprite.fillAmount = value;
+				sprite.fillDirection = UISprite.FillDirection.Vertical;
+				sprite.invert = isInverted;
+				sprite.fillAmount = value;
 			}
 			else
 			{
