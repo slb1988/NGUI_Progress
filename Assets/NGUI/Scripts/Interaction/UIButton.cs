@@ -56,8 +56,8 @@ public class UIButton : UIButtonColor
 	public List<EventDelegate> onClick = new List<EventDelegate>();
 
 	// Cached value
-	string mNormalSprite;
-	UISprite mSprite;
+	[System.NonSerialized] string mNormalSprite;
+	[System.NonSerialized] UISprite mSprite;
 
 	/// <summary>
 	/// Whether the button should be enabled.
@@ -206,7 +206,7 @@ public class UIButton : UIButtonColor
 	/// Change the visual state.
 	/// </summary>
 
-	protected override void SetState (State state, bool immediate)
+	public override void SetState (State state, bool immediate)
 	{
 		base.SetState(state, immediate);
 
