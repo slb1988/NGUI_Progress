@@ -266,6 +266,12 @@ public class UIGrid : UIWidgetContainer
 		enabled = false;
 	}
 
+	/// <summary>
+	/// Reposition the content on inspector validation.
+	/// </summary>
+
+	void OnValidate () { if (!Application.isPlaying && NGUITools.GetActive(this)) Reposition(); }
+
 	// Various generic sorting functions
 	static public int SortByName (Transform a, Transform b) { return string.Compare(a.name, b.name); }
 	static public int SortHorizontal (Transform a, Transform b) { return a.localPosition.x.CompareTo(b.localPosition.x); }
@@ -322,7 +328,11 @@ public class UIGrid : UIWidgetContainer
 	public void ConstrainWithinPanel ()
 	{
 		if (mPanel != null)
+		{
 			mPanel.ConstrainTargetToBounds(transform, true);
+			UIScrollView sv = mPanel.GetComponent<UIScrollView>();
+			if (sv != null) sv.UpdateScrollbars(true);
+		}
 	}
 
 	/// <summary>
