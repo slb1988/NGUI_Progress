@@ -333,9 +333,20 @@ static public class NGUITools
 
 			if (w != null)
 			{
-				Vector3[] corners = w.localCorners;
-				box.center = Vector3.Lerp(corners[0], corners[2], 0.5f);
-				box.size = corners[2] - corners[0];
+				Vector4 dr = w.drawRegion;
+
+				if (dr.x != 0f || dr.y != 0f || dr.z != 1f || dr.w != 1f)
+				{
+					Vector4 region = w.drawingDimensions;
+					box.center = new Vector3((region.x + region.z) * 0.5f, (region.y + region.w) * 0.5f);
+					box.size = new Vector3(region.z - region.x, region.w - region.y);
+				}
+				else
+				{
+					Vector3[] corners = w.localCorners;
+					box.center = Vector3.Lerp(corners[0], corners[2], 0.5f);
+					box.size = corners[2] - corners[0];
+				}
 			}
 			else
 			{
@@ -1476,7 +1487,7 @@ static public class NGUITools
 
 		foreach (T comp in comps)
 		{
-#if UNITY_WEBPLAYER || UNITY_FLASH || UNITY_METRO || UNITY_WP8
+#if !UNITY_EDITOR && (UNITY_WEBPLAYER || UNITY_FLASH || UNITY_METRO || UNITY_WP8)
 			comp.SendMessage(funcName, SendMessageOptions.DontRequireReceiver);
 #else
 			MethodInfo method = comp.GetType().GetMethod(funcName, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
